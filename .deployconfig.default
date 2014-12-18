@@ -4,3 +4,7 @@
 
 # Set the Pantheon site UUID
 # SITE_ID="00000000-0000-0000-0000-000000000000"
+
+# Setting this to 1 will automatically add new multidev hosts to your
+# known_hosts file. Defaults to 0.
+# AUTO_ADD=1

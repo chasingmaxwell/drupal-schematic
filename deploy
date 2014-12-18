@@ -14,10 +14,15 @@ Description:
 Options:
   -h|--help
     Show this help.
+  --auto-add
+    Automatically add new multidev hosts to your known_hosts file.
 
 Arguments:
   SITE_ID
     The UUID for the site on Pantheon.
+  AUTO_ADD
+    Setting this to 1 will automatically add new multidev hosts to your
+    known_hosts file. Defaults to 0.
 
 Configuration:
   You can configure the default behavior of the deploy script by copying
@@ -47,6 +52,7 @@ src=$( cd $(dirname $0) ; pwd -P )
 configFile="$src"/.deployconfig
 makeFile="$src"/deployment.make
 newEnvCreated=0
+autoAdd=0
 
 # Handle success/error messages.
 deployMessage () {
@@ -71,6 +77,11 @@ if [ -e "$configFile" ]; then
   if [ -n "$SITE_ID" ]; then
     siteID=$SITE_ID
   fi
+
+  # Set the autoAdd flag.
+  if [ -n "$AUTO_ADD" ]; then
+    autoAdd=$AUTO_ADD
+  fi
 fi
 
 # Parse options.
@@ -80,6 +91,10 @@ while test $# -gt 0; do
     -h|--help)
       echo "$deployHelp"
       exit
+      ;;
+    --auto-add)
+      autoAdd=1
+      shift
       ;;
     -*)
       deployMessage error "Invalid option${normal} $1"
@@ -158,11 +173,19 @@ else
 fi
 deployMessage success "Temporary repository created and${normal} $branch${green} branch checked out."
 
-# Run drush make against site in temp directory.
+# Change to temp directory.
 cd "$buildRepoDir" || exitDeploy
+
+# Clear out everything except .git directory.
+rm -rf `ls -a | grep -Ev '^(\.|\.\.|\.git)$'` || exitDeploy
+deployMessage success "Cleared working directory. Ready to make site."
+
+# Run drush make.
 drush make "$makeFile" -y --no-patch-txt || exitDeploy
-cd "$src" || exitDeploy
 deployMessage success "Site made."
+
+# Change back to source directory.
+cd "$src" || exitDeploy
 
 # Rsync custom modules directory.
 rm -rf "$buildRepoDir"/sites/all/modules/custom || exitDeploy
@@ -196,7 +219,7 @@ if [ ! "$branch" = "master" ]; then
     drush psite-ecreate "$siteID" "$branch" || exitDeploy
     deployMessage success "Pantheon multidev environment created for the${normal} $branch${green} branch."
     newEnvCreated=1
-    sleep 5
+    sleep 30
   fi
 
   # Set Pantheon environment to current branch.
@@ -215,13 +238,9 @@ deployMessage success "Pantheon aliases updated."
 sleep 5
 
 # If a new environment was created, add the new host to known hosts.
-if [ $newEnvCreated -ne 0 ]; then
+if [ $autoAdd -eq 1 -a $newEnvCreated -ne 0 ]; then
   remoteHost=$(drush sa $alias --fields=remote-host --format=csv --field-labels=0) || exitDeploy
-  remoteIP=$(dig +short $remoteHost | awk '{ print ; exit }') || exitDeploy
   ssh-keygen -R "$remoteHost" || exitDeploy
-  ssh-keygen -R "$remoteIP" || exitDeploy
-  ssh-keyscan -H -p 2222 "$remoteHost","$remoteIP" >> ~/.ssh/known_hosts || exitDeploy
-  ssh-keyscan -H -p 2222 "$remoteIP" >> ~/.ssh/known_hosts || exitDeploy
   ssh-keyscan -H -p 2222 "$remoteHost" >> ~/.ssh/known_hosts || exitDeploy
   deployMessage success "Host for new environment added to known_hosts."
 fi
@@ -244,7 +263,7 @@ sleep 5
 # Make sure master module is enabled and run master-execute to ensure modules
 # are properly enabled/disabled.
 drush "$alias" en master -y --strict=0 || exitDeploy
-drush "$alias" master-execute --scope="remote" --strict=0 -y || exitDeploy
+drush "$alias" master-execute --scope=dev --strict=0 -y || exitDeploy
 deployMessage success "Modules enabled/disabled."
 sleep 5
 
