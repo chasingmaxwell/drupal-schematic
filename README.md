@@ -79,12 +79,9 @@ you some time when running the build and deploy scripts. Take a look at
 
 ### FAQs
 
-1. How do I add a contrib module?
+1. __How do I add a contrib module?__ Add the module to your make file AND the master_modules array in settings.php. Both of these steps are required to add and enable a new
+module.
 
-Add the module to your make file AND the master_modules array in settings.php.
-Both of these steps are required to add and enable a new module.
-
-2. How do I add a custom module?
-
-Include your custom module in sites/all/modules/custom AND add the module
-name to the master_modules array in settings.php.
+2. __How do I add a custom module?__ Include your custom module in
+sites/all/modules/custom AND add the module name to the master_modules array in
+settings.php.
