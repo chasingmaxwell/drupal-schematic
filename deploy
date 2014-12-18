@@ -1,0 +1,264 @@
+#!/bin/bash
+#
+# Deploy the current branch in this repository to a branch of the same name in
+# the remote Pantheon environment.
+
+deployHelp="
+Usage: ./deploy [SITE_ID]
+  or   ./deploy [-h|--help]
+
+Description:
+  Deploy the current branch in this repository to a branch of the same name in
+  the remote repository and Pantheon environment.
+
+Options:
+  -h|--help
+    Show this help.
+
+Arguments:
+  SITE_ID
+    The UUID for the site on Pantheon.
+
+Configuration:
+  You can configure the default behavior of the deploy script by copying
+  .deployconfig.default to .deployconfig, uncommenting configuration variables,
+  and setting the desired values. The available configuration variables are:
+
+  SITE_ID
+    Specify the site UUID so the SITE_ID argument can be omitted.
+"
+
+# See if colors are supported.
+ncolors=$(tty -s && tput colors)
+
+# Define colors for pretty status messages.
+if [ -n "$ncolors" ] && [ $ncolors -ge 8 ]; then
+  green="$(tput setaf 2)"
+  red="$(tput setaf 1)"
+  normal="$(tput sgr0)"
+else
+  green=""
+  red=""
+  normal=""
+fi
+
+# Define default variables.
+src=$( cd $(dirname $0) ; pwd -P )
+configFile="$src"/.deployconfig
+makeFile="$src"/deployment.make
+newEnvCreated=0
+
+# Handle success/error messages.
+deployMessage () {
+  if [ $1 = 'error' ]; then
+    messageColor=${red}
+    messagePrefix="Error: "
+  else
+    messageColor=${green}
+    messagePrefix=""
+  fi
+
+  echo
+  echo "$messageColor## $messagePrefix$2${normal}"
+  echo
+}
+
+# Load configuration.
+if [ -e "$configFile" ]; then
+  source "$configFile"
+
+  # Set the Pantheon site UUID.
+  if [ -n "$SITE_ID" ]; then
+    siteID=$SITE_ID
+  fi
+fi
+
+# Parse options.
+# @TODO: allow a commit message to be entered?
+while test $# -gt 0; do
+  case "$1" in
+    -h|--help)
+      echo "$deployHelp"
+      exit
+      ;;
+    -*)
+      deployMessage error "Invalid option${normal} $1"
+      exit 1
+      ;;
+    *)
+      siteID="$1"
+      shift
+      ;;
+  esac
+done
+
+# Make sure there are no uncommitted changes.
+if [ ! -z "$(git --git-dir=$src/.git --work-tree=$src status -s)" ]; then
+  deployMessage error "You can not deploy uncommitted changes. Please commit or remove all changes in the working directory and run this command again."
+  exit 1
+fi
+
+# Get the current branch name and hash.
+branch="$(git --git-dir=$src/.git --work-tree=$src symbolic-ref --short HEAD)"
+commit="$(git rev-parse --short HEAD)"
+
+# Set site-specific variables.
+remoteRepo="ssh://codeserver.dev.$siteID@codeserver.dev.$siteID.drush.in:2222/~/repository.git"
+siteName="$(drush psite-name $siteID)"
+
+# Bail if we do not have a siteName.
+if [ ! -n "$siteName" ]; then
+  deployMessage error "The site name could not be attained. This might mean you need to authenticate by running drush pauth."
+  exit 1
+fi
+
+# Create tmp directory and provide for its deletion.
+buildRepoDir="$(mktemp -d -t build.XXXXXXXX)"
+tmpSiteCleanup () {
+  rm -rf "$buildRepoDir"
+  deployMessage success "Temporary files removed."
+}
+
+# Make sure we properly shut things down.
+exitDeploy () {
+  deployMessage error "Uh oh. Looks like something went wrong. Aborting."
+  tmpSiteCleanup
+  exit 1
+}
+
+# Make sure a branch of the same branch name exists on Pantheon. If it does, prompt for confirmation. If it doesn't, prompt for creation.
+if [ -z "$(git ls-remote $remoteRepo $branch || exitDeploy)" ]; then
+  # Prompt for branch creation.
+  echo "The $branch branch does not exist in the remote repository. Would you like to create it? [y | n]:"
+  read createBranch
+
+  # Abort deployment if user chooses not to create remote branch.
+  if ! [[ $createBranch =~ ^y|Y$ ]]; then
+    deployMessage error "Deployment aborted. No corresponding remote branch exists."
+    exitDeploy
+  fi
+
+  # Clone the repository and create the branch.
+  git clone "$remoteRepo" "$buildRepoDir" || exitDeploy
+  git --git-dir=$buildRepoDir/.git --work-tree=$buildRepoDir checkout -b "$branch" || exitDeploy
+else
+  # Prompt for confirmation.
+  echo "You are deploying to the $branch branch in the remote repository. Would you like to continue? [y | n]:"
+  read confirmed
+
+  # Abort deployment if the user does not confirm.
+  if ! [[ $confirmed =~ ^y|Y$ ]]; then
+    deployMessage error "Deployment aborted."
+    exitDeploy
+  fi
+
+  # Clone the repository and checkout the branch.
+  git clone "$remoteRepo" "$buildRepoDir" || exitDeploy
+  git --git-dir=$buildRepoDir/.git --work-tree=$buildRepoDir checkout "$branch" || exitDeploy
+fi
+deployMessage success "Temporary repository created and${normal} $branch${green} branch checked out."
+
+# Run drush make against site in temp directory.
+cd "$buildRepoDir" || exitDeploy
+drush make "$makeFile" -y --no-patch-txt || exitDeploy
+cd "$src" || exitDeploy
+deployMessage success "Site made."
+
+# Rsync custom modules directory.
+rm -rf "$buildRepoDir"/sites/all/modules/custom || exitDeploy
+rsync -a "$src"/sites/all/modules/custom/ "$buildRepoDir"/sites/all/modules/custom/ || exitDeploy
+deployMessage success "Custom modules directory synced."
+
+# Rsync themes directory.
+rm -rf "$buildRepoDir"/sites/all/themes/custom || exitDeploy
+rsync -a "$src"/sites/all/themes/custom "$buildRepoDir"/sites/all/themes/custom || exitDeploy
+deployMessage success "Themes directory synced."
+
+# Rsync settings file.
+rsync -a "$src"/sites/default/settings.php "$buildRepoDir"/sites/default/settings.php || exitDeploy
+deployMessage success "Settings file synced."
+
+# Commit the resulting changes and push up to remote.
+git --git-dir=$buildRepoDir/.git --work-tree=$buildRepoDir add -A . || exitDeploy
+git --git-dir=$buildRepoDir/.git --work-tree=$buildRepoDir commit -m "Successful build on $branch branch at $commit." || exitDeploy
+git --git-dir=$buildRepoDir/.git --work-tree=$buildRepoDir push origin "$branch" || exitDeploy
+deployMessage success "Updated branch pushed to remote repository."
+sleep 5
+
+# Handle deployment differently if we're on the master branch.
+if [ ! "$branch" = "master" ]; then
+  # Determine whether a multidev environment exists. This command will return a
+  # status code of 0 if the environment exists.
+  curl --fail --silent "http://$branch-$siteName.gotpantheon.com" &> /dev/null
+
+  # Create multidev environment for the given branch if it doesn't exist.
+  if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    drush psite-ecreate "$siteID" "$branch" || exitDeploy
+    deployMessage success "Pantheon multidev environment created for the${normal} $branch${green} branch."
+    newEnvCreated=1
+    sleep 5
+  fi
+
+  # Set Pantheon environment to current branch.
+  environment="$branch"
+else
+  # Always deploy to the dev Pantheon environment when the branch is "master".
+  environment="dev"
+fi
+
+# Set Pantheon alias.
+alias="@$siteName.$environment"
+
+# Update Pantheon aliases.
+drush paliases || exitDeploy
+deployMessage success "Pantheon aliases updated."
+sleep 5
+
+# If a new environment was created, add the new host to known hosts.
+if [ $newEnvCreated -ne 0 ]; then
+  remoteHost=$(drush sa $alias --fields=remote-host --format=csv --field-labels=0) || exitDeploy
+  remoteIP=$(dig +short $remoteHost | awk '{ print ; exit }') || exitDeploy
+  ssh-keygen -R "$remoteHost" || exitDeploy
+  ssh-keygen -R "$remoteIP" || exitDeploy
+  ssh-keyscan -H -p 2222 "$remoteHost","$remoteIP" >> ~/.ssh/known_hosts || exitDeploy
+  ssh-keyscan -H -p 2222 "$remoteIP" >> ~/.ssh/known_hosts || exitDeploy
+  ssh-keyscan -H -p 2222 "$remoteHost" >> ~/.ssh/known_hosts || exitDeploy
+  deployMessage success "Host for new environment added to known_hosts."
+fi
+
+# Run database updates.
+drush "$alias" updb -y --strict=0 || exitDeploy
+deployMessage success "Updates performed."
+sleep 5
+
+# Clear Drush cache.
+drush "$alias" cc drush --strict=0 || exitDeploy
+deployMessage success "Drush cache cleared."
+sleep 5
+
+# Clear all caches.
+drush "$alias" cc all --strict=0 || exitDeploy
+deployMessage success "All caches cleared."
+sleep 5
+
+# Make sure master module is enabled and run master-execute to ensure modules
+# are properly enabled/disabled.
+drush "$alias" en master -y --strict=0 || exitDeploy
+drush "$alias" master-execute --scope="remote" --strict=0 -y || exitDeploy
+deployMessage success "Modules enabled/disabled."
+sleep 5
+
+# Revert all features.
+drush "$alias" fra -y --strict=0 || exitDeploy
+deployMessage success "Features reverted."
+sleep 5
+
+# Rebuild the registry.
+drush "$alias" rr -y --strict=0 || exitDeploy
+deployMessage success "Registry rebuilt."
+
+# Cleanup
+tmpSiteCleanup
+
+# Success!
+deployMessage success "Deployment of the${normal} $branch${green} branch to the${normal} $environment${green} Pantheon environment completed!"

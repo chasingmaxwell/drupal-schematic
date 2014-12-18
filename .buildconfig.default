@@ -1,0 +1,24 @@
+# Provide configuration for builds. To change default configuration, copy this
+# file to .buildconfig, uncomment the below configuration variables and set the
+# desired values. To provide separate configuration for remote builds, copy this
+# file to .buildremoteconfig and do the same.
+
+# Set the default target location for the build. By default this information is
+# required as an argument.
+# BUILD_LOCATION=/some/path
+
+# Set a default remote host at which the site will be built. If this variable
+# is set, the BUILD_SOURCE variable must also be set and must point to a
+# source directory located on the remote host. By default no remote host is
+# specified which means the build is run locally.
+# REMOTE_HOST=somehost.com
+
+# Set a default source directory (directory where custom modules, themes, site
+# settings, and make files are located). This is mostly useful (and in-fact
+# required) when using the -r|--remote flag to build on a remote host. When used
+# with a remote host, this must point to a path on the remote host. Defaults to
+# the directory containing the build script.
+# BUILD_SOURCE=/some/path
+
+# Set a default make file to use with drush make. Defaults to ./development.make
+# MAKE_FILE=./development.make

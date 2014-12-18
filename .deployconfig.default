@@ -1,0 +1,6 @@
+# Provide configuration for remote deployment. To change default configuration, copy
+# this file to .deployconfig, uncomment the below configuration variables and set
+# the desired values.
+
+# Set the Pantheon site UUID
+# SITE_ID="00000000-0000-0000-0000-000000000000"

@@ -1,0 +1,295 @@
+#!/bin/bash
+#
+# Build the site for local development in the target directory.
+
+buildHelp="
+Usage:
+  Local Builds
+    ./build [-s|--source <path>] [-m|--makefile <file>] [TARGET]
+
+  Remote Builds
+    ./build [-r|--remote --host <host>] [-s|--source <path>]
+            [-m|--makefile <file>] [-i|--ignore] [TARGET]
+
+  Help
+    ./build [-h|--help]
+
+Description:
+  Build the site for local development at the target directory.
+
+Options:
+  -s|--source <path>
+    Specify the directory containing custom modules, themes, site settings, and
+    make files. Defaults to the directory containing the build script.
+  -m|--makefile <file>
+    Specify the make file to use when running drush make. Defaults to
+    development.make in the source directory.
+  -r|--remote
+    Perform the build on a remote host. If this flag is present, the --host
+    option is required.
+  --host <host>
+    Define the remote host on which to perform the build.
+  -i|--ignore
+    Ignore all configuration variables.
+  -h|--help
+    Show this help.
+
+Arguments:
+  TARGET
+    The directory in which to build. This argument can be ommitted only if the
+    BUILD_LOCATION configuration variable is set in .buildconfig (or
+    .buildremoteconfig if building remotely) and configuration is not being
+    ignored.
+
+Configuration:
+  You can configure the default behavior of the build script by copying
+  .buildconfig.default to .buildconfig, uncommenting configuration variables,
+  and setting the desired values. You can do the same to .buildremoteconfig if
+  you want to define separate configuration for remote builds. The available
+  configuration variables are:
+
+  BUILD_LOCATION
+    Set the default target location for the build. By default this information
+    is required as an argument.
+  REMOTE_HOST
+    Set a default remote host at which the site will be built. If this variable
+    is set, the BUILD_SOURCE variable must also be set and must point to a
+    source directory located on the remote host. By default no remote host is
+    specified which means the build is run locally.
+  BUILD_SOURCE
+    Set a default source directory (directory where custom modules, themes, site
+    settings, and make files are located). This is mostly useful (and in-fact
+    required) when using the -r|--remote flag to build on a remote host. When
+    used with a remote host, this must point to a path on the remote host.
+    Defaults to the directory containing the build script.
+  MAKE_FILE
+    Set a default make file to use with drush make. Defaults to
+    development.make in the source directory.
+"
+
+#
+# Add some color (if supported).
+#
+ncolors=$(tty -s && tput colors)
+
+# Define colors.
+if [ -n "$ncolors" ] && [ $ncolors -ge 8 ]; then
+  green="$(tput setaf 2)"
+  red="$(tput setaf 1)"
+  normal="$(tput sgr0)"
+else
+  green=""
+  red=""
+  normal=""
+fi
+
+#
+# Define default variables.
+#
+scriptSRC=$( cd $(dirname $0) ; pwd -P )
+configFile="$scriptSRC"/.buildconfig
+remoteConfigFile="$scriptSRC"/.buildremoteconfig
+remoteBuild=0
+ignoreConfiguration=0
+declare src
+declare makeFile
+declare target
+declare remoteHost
+
+#
+# Handle success/error messages.
+#
+buildMessage () {
+  if [ $1 = 'error' ]; then
+    messageColor=${red}
+    messagePrefix="Error: "
+  else
+    messageColor=${green}
+    messagePrefix=""
+  fi
+
+  echo
+  echo "$messageColor## $messagePrefix$2${normal}"
+  echo
+}
+
+#
+# Parse options.
+#
+while test $# -gt 0; do
+  case "$1" in
+    -h|--help)
+      echo "$buildHelp"
+      exit
+      ;;
+    -r|--remote)
+      remoteBuild=1
+      if [ -e "$remoteConfigFile" ]; then
+        configFile=$remoteConfigFile
+      fi
+      shift
+      ;;
+    --host)
+      remoteHost="$2"
+      shift
+      shift
+      ;;
+    -s|--source)
+      src=${2%/}
+      shift
+      shift
+      ;;
+    -m|--makefile)
+      makeFile="$2"
+      shift
+      shift
+      ;;
+    -i|--ignore)
+      ignoreConfiguration=1
+      shift
+      ;;
+    -*)
+      buildMessage error "Invalid option $1"
+      exit 1
+      ;;
+    *)
+      # Define target directory.
+      target=${1%/}
+      shift
+      ;;
+  esac
+done
+
+#
+# Load configuration.
+#
+if [ -e "$configFile" -a $ignoreConfiguration -ne 1 ]; then
+  source "$configFile"
+
+  # Set target to build repository location.
+  if [ -n "$BUILD_LOCATION" -a ! -n "$target" ]; then
+    target=$BUILD_LOCATION
+  fi
+
+  # Set remote host.
+  if [ -n "$REMOTE_HOST" -a ! -n "$remoteHost" ]; then
+    remoteHost=$REMOTE_HOST
+  fi
+
+  # Set build source directory.
+  if [ -n "$BUILD_SOURCE" -a ! -n "$src" ]; then
+    src=$BUILD_SOURCE
+  fi
+
+  # Set make file.
+  if [ -n "$MAKE_FILE" -a ! -n "$makeFile" ]; then
+    makeFile=$MAKE_FILE
+  fi
+fi
+
+#
+# Set required variables if not provided by options or configuration
+#
+if [ ! -n "$src" ]; then
+  # Set default src if none was specified.
+  src=$scriptSRC
+fi
+
+if [ ! -n "$makeFile" ]; then
+  # Set default make file, if none was specified.
+  makeFile="$src"/development.make
+fi
+
+#
+# Sanity checks.
+#
+if [ ! -n "$target" ]; then
+  # Require a target directory.
+  buildMessage error "Missing target argument. Please specify the directory in which to build."
+  exit 1
+fi
+
+#
+# Handle executing this script remotely.
+#
+if [ $remoteBuild -ne 0 ]; then
+  # Bail if we do not have a host to build to.
+  if [ ! -n "$remoteHost" ]; then
+    buildMessage error "No remote host. You must use the --host option or the REMOTE_HOST configuration variable when building remotely."
+    exit 1
+  fi
+
+  buildMessage success "Building remotely to ${normal}$remoteHost${green}."
+  ssh "$remoteHost" 'bash -s' < "$scriptSRC"/build $target -s "$src" -m "$makeFile" -i
+  if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    buildMessage error "Something went wrong building to ${normal}$remoteHost${red}."
+    exit 1;
+  fi
+  buildMessage success "Remote build to ${normal}$remoteHost${green} successful!"
+  exit 0;
+fi
+
+#
+# Run the build.
+#
+buildMessage success "Starting build at${normal} $target${green}."
+
+# Make the drupal site at the given location.
+mkdir "$target" 2>/dev/null
+cd "$target"
+rm -rf "$target"/sites/all/modules/contrib
+drush make "$makeFile" -y
+cd "$src"
+buildMessage success "Site made."
+
+# Create symlink for custom module directory.
+rm -rf "$target"/sites/all/modules/custom
+ln -s "$src"/sites/all/modules/custom "$target"/sites/all/modules/custom
+buildMessage success "Symlink created for custom modules directory."
+
+# Create symlink for themes directory.
+rm -rf "$target"/sites/all/themes/custom
+ln -s "$src"/sites/all/themes/custom "$target"/sites/all/themes/custom
+buildMessage success "Symlink created for custom themes directory."
+
+# Create symlink for settings file.
+rm "$target"/sites/default/settings.php 2>/dev/null
+ln -s "$src"/sites/default/settings.php "$target"/sites/default/settings.php
+buildMessage success "Symlink created for settings file."
+
+# Check for a functional Drupal environment. Exit if none is found.
+drush -r "$target" rq &> /dev/null
+if [ ${PIPESTATUS[0]} -ne 0 ]; then
+  buildMessage error "$target is not a functional Drupal environment. Make sure you have a database and that settings.php is properly configured."
+  exit 1
+fi
+
+# Run database updates.
+drush -r "$target" updb -y
+buildMessage success "Updates performed."
+
+# Clear Drush cache.
+drush -r "$target" cc drush
+buildMessage success "Drush cache cleared."
+
+# Clear all caches.
+drush -r "$target" cc all
+buildMessage success "All caches cleared."
+
+# Make sure master module is enabled and run master-execute to ensure modules
+# are properly enabled/disabled.
+drush -r "$target" en master -y
+drush -r "$target" master-execute --scope="local" -y
+buildMessage success "Modules enabled/disabled."
+
+# Revert all features.
+drush -r "$target" fra -y
+buildMessage success "Features reverted."
+
+# Rebuild the registry.
+drush dl registry_rebuild -n &> /dev/null
+drush -r "$target" rr -y
+buildMessage success "Registry rebuilt."
+
+# End message.
+buildMessage success "Build completed at${normal} $target${green}."
