@@ -5,13 +5,13 @@ deploy workflow. It uses [drush make](http://drush.org/en/master/make/),
 [features](https://www.drupal.org/project/features), and
 [master](https://www.drupal.org/project/master) to create the "schematic"
 for a Drupal site. The not-so-secret sauce that makes this project useful are
-the `./build` and `./deploy` scripts it ships with. These scripts take the state
+the `./build` and `./deploy` commands it provides. These scripts take the state
 of your project and either build a Drupal site for local development or deploy
 the site remotely.
 
-__NOTE: Currently only deployment to Pantheon is supported.__ This was all I
-needed when initially developing this project. If you need support for another
-deployment method, let's chat!
+__NOTE: Currently Pantheon is the only supported deployment target.__ This was
+all I needed when initially developing this project. If you need support for
+another deployment target, let's chat!
 
 ## Dependencies
 
@@ -45,7 +45,7 @@ and fra) to make sure the site is up-to-date.
 
 ### Deploying
 
-Also pretty easy `./deploy <PANTHEON SITE ID>`. Again, you should run
+Also pretty easy: `./deploy <PANTHEON SITE ID>`. Again, you should run
 `./deploy --help` to understand the available options and configuration.
 
 The deployment script commits the result of a build to the repository associated
@@ -61,7 +61,7 @@ There are a number of configuration variables you can take advantage of to save
 you some time when running the build and deploy scripts. Take a look at
 .buildconfig.default and .deployconfig.default to learn about them.
 
-### Structure
+## Structure
 
 - `sites/all/modules/custom` and `sites/all/themes/custom` contain your custom
   modules and themes.
@@ -77,11 +77,17 @@ you some time when running the build and deploy scripts. Take a look at
 
 - `development.make` is used in development builds and includes `common.make`.
 
-### FAQs
+## FAQs
 
-1. __How do I add a contrib module?__ Add the module to your make file AND the master_modules array in settings.php. Both of these steps are required to add and enable a new
-module.
+1. __How do I add a contrib module?__ Add the module to your make file AND the
+master_modules array in settings.php. Both of these steps are required to add
+and enable a new module.
 
 2. __How do I add a custom module?__ Include your custom module in
 sites/all/modules/custom AND add the module name to the master_modules array in
 settings.php.
+
+## Similar projects
+
+- [grunt-drupal-tasks](https://github.com/phase2/grunt-drupal-tasks) is a set of
+  grunt tasks for Drupal which include tasks for building with drush make.
