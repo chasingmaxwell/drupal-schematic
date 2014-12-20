@@ -237,7 +237,12 @@ buildMessage success "Starting build at${normal} $target${green}."
 # Make the drupal site at the given location.
 mkdir "$target" 2>/dev/null
 cd "$target"
-rm -rf "$target"/*
+rm -rf `ls -a | grep -Ev '^(\.|\.\.|sites)$'`
+cd sites
+rm -rf `ls -a | grep -Ev '^(\.|\.\.|default)$'`
+cd default
+rm -rf `ls -a | grep -Ev '^(\.|\.\.|files)$'`
+cd ../../
 drush make "$makeFile" -y
 cd "$src"
 buildMessage success "Site made."
