@@ -238,8 +238,10 @@ buildMessage success "Starting build at${normal} $target${green}."
 mkdir "$target" 2>/dev/null
 cd "$target"
 rm -rf `ls -a | grep -Ev '^(\.|\.\.|sites)$'`
+mkdir sites 2>/dev/null
 cd sites
 rm -rf `ls -a | grep -Ev '^(\.|\.\.|default)$'`
+mkdir default 2>/dev/null
 cd default
 rm -rf `ls -a | grep -Ev '^(\.|\.\.|files)$'`
 cd ../../
